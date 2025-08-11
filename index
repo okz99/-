@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<title>漢字ピッタン 4×4（対戦・不成立3回で強制交代・中央バナー）</title>
+<style>
+  :root{
+    --bg:#f7f9fc; --panel:#ffffff; --grid:#eef2f7; --cell:#ffffff;
+    --fg:#0b1220; --muted:#6b7280; --accent:#2563eb;
+    --blue:#3b82f6;        --blueBorder:#1d4ed8;
+    --red:#ef4444;         --redBorder:#b91c1c;
+    --yellow:#f59e0b;      --yellowBorder:#b45309; /* 追加：交代バナー色 */
+    --line:#e5e7eb; --shadow:0 4px 14px rgba(0,0,0,.06);
+    --gap:6px; --rgap:6px;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,system-ui,"SF Pro Text","Hiragino Kaku Gothic ProN","Yu Gothic",meiryo,sans-serif;}
+  .app{height:100vh;display:flex;flex-direction:column;gap:8px;
+    padding:10px env(safe-area-inset-right) 12px env(safe-area-inset-left)}
+  header{display:flex;align-items:center;gap:10px}
+  .title{font-weight:700;color:var(--fg)}
+
+  /* 2行目メッセージ（通常案内や成立通知用） */
+  #msgbar{
+    background:#fff;color:#111;border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;font-size:18px;font-weight:800;line-height:1.2;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:var(--shadow);
+    min-height:22px; transition:background-color .15s,color .15s,border-color .15s;
+  }
+  .msg-blue{ background:var(--blue); color:#fff; border-color:var(--blueBorder); }
+  .msg-red { background:var(--red);  color:#fff; border-color:var(--redBorder); }
+
+  /* 盤面 */
+  .board,.rackwrap{border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow);padding:8px}
+  .board{display:flex;justify-content:center;position:relative}
+  .grid{display:grid;gap:var(--gap);background:var(--grid);padding:8px;border-radius:10px}
+  .cell{
+    display:flex;align-items:center;justify-content:center;aspect-ratio:1/1;border-radius:10px;
+    background:var(--cell);border:1px solid var(--line);font-size:28px;font-weight:800;user-select:none;
+    transition:background-color .15s,border-color .15s; position:relative; overflow:hidden;
+  }
+  .cell.empty{color:var(--muted);font-weight:600;font-size:16px}
+  .cell.sel{outline:2px solid var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15) inset;border-color:var(--accent)}
+  .cell.blue{background:rgba(59,130,246,.16); border-color:var(--blueBorder)}
+  .cell.red {background:rgba(239,68,68,.16);  border-color:var(--redBorder)}
+
+  /* フラッシュ（5回） */
+  @keyframes flashB{0%{box-shadow:0 0 0 9999px rgba(59,130,246,.92) inset}100%{box-shadow:none}}
+  @keyframes flashR{0%{box-shadow:0 0 0 9999px rgba(239,68,68,.92) inset}100%{box-shadow:none}}
+  .flash-blue{animation:flashB .25s ease-out 5}
+  .flash-red {animation:flashR .25s ease-out 5}
+
+  /* 判定中オーバーレイ */
+  .overlay{position:absolute; inset:0; background:rgba(255,255,255,0.8);
+    display:flex; align-items:center; justify-content:center; font-size:28px; font-weight:900; color:#111;
+    border-radius:12px; z-index:15; visibility:hidden;}
+
+  /* 中央バナー（ターン表示やターン交代） */
+  .turnOverlay{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; z-index:12; opacity:0; transition:opacity .2s ease;}
+  .turnBadge{min-width:60%; text-align:center; padding:14px 18px; border-radius:12px;
+    font-size:28px; font-weight:900; color:#fff; box-shadow:var(--shadow); border:1px solid transparent;}
+  .turn-blue{background:var(--blue); border-color:var(--blueBorder)}
+  .turn-red {background:var(--red);  border-color:var(--redBorder)}
+  .turn-yellow{background:var(--yellow); border-color:var(--yellowBorder)} /* 追加：交代用黄色 */
+
+  /* 下段：左サイド（手番タグ＋パス）＋右側タイル */
+  .rackbar{display:flex;align-items:center;justify-content:center;gap:10px}
+  .rack{display:grid;gap:var(--rgap);justify-content:center;}
+  .rackSide{display:flex; flex-direction:column; align-items:center; gap:8px; min-width:80px;}
+
+  /* 正方形手番タグ（横書き、「青」大／「の番」小） */
+  .turnTag{
+    width:80px; height:80px; border-radius:12px; border:1px solid transparent;
+    display:flex; align-items:center; justify-content:center; background:#ccc; color:#fff; user-select:none; box-shadow:var(--shadow);
+  }
+  .tag-blue{ background:var(--blue); border-color:var(--blueBorder) }
+  .tag-red { background:var(--red);  border-color:var(--redBorder)  }
+  .tt-label{display:flex; align-items:baseline; gap:2px;}
+  .tt-big{font-size:30px; font-weight:900; line-height:1;}
+  .tt-sub{font-size:12px; font-weight:800; line-height:1;}
+
+  /* タイル */
+  .tile{
+    display:flex;align-items:center;justify-content:center;aspect-ratio:1/1;border-radius:10px;
+    background:linear-gradient(180deg,#ffffff,#f2f6fb);border:1px solid var(--line);
+    font-weight:900;cursor:pointer;transition:transform .06s,opacity .15s,box-shadow .15s;
+    box-shadow:0 1px 2px rgba(0,0,0,.04);
+  }
+  .tile.used{opacity:.35;pointer-events:none}
+
+  /* パスボタン */
+  .passbtn{
+    width:88px; height:40px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid var(--line); background:linear-gradient(180deg,#f8fafc,#eef2f7);
+    box-shadow:0 1px 2px rgba(0,0,0,.04); font-weight:900; font-size:18px; cursor:pointer;
+  }
+  .passbtn:active{transform:translateY(1px)}
+
+  .controls{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+  button{appearance:none;border:1px solid var(--line);border-radius:10px;
+    background:linear-gradient(180deg,#f8fafc,#eef2f7);color:#0b1220;padding:8px 12px;font-weight:700}
+
+  /* 最下部スコア */
+  footer{font-size:14px;color:#111;display:flex;justify-content:center;margin-top:auto}
+  .score{display:flex;gap:12px;font-weight:800}
+  .score .b{color:#1d4ed8} .score .r{color:#b91c1c}
+
+  /* 勝敗モーダル */
+  .finalModal{
+    position:absolute; inset:0; z-index:20; display:none;
+    align-items:center; justify-content:center; background:rgba(0,0,0,.25);
+    border-radius:12px;
+  }
+  .finalModal.show{ display:flex; }
+  .finalBox{
+    background:#fff; color:#111; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
+    padding:20px 18px; max-width:80%; text-align:center; font-weight:900; font-size:20px;
+  }
+  .finalBox small{ display:block; margin-top:6px; font-size:12px; font-weight:700; color:#555; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header><div class="title">漢字ピッタン 4×4（対戦）</div></header>
+
+  <!-- 2行目：メッセージ -->
+  <div id="msgbar">マスを選んで、下の漢字をタップ</div>
+
+  <!-- 盤面 -->
+  <div class="board">
+    <div id="overlay" class="overlay">判定中・・</div>
+    <div id="turnOverlay" class="turnOverlay" aria-live="polite">
+      <div id="turnBadge" class="turnBadge turn-blue">青の番です</div>
+    </div>
+    <!-- 勝敗モーダル -->
+    <div id="finalModal" class="finalModal" role="dialog" aria-modal="true">
+      <div id="finalBox" class="finalBox">結果</div>
+    </div>
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <!-- パネル群 -->
+  <div class="rackwrap">
+    <div class="rackbar">
+      <!-- 左：手番タグ + パス -->
+      <div class="rackSide">
+        <div id="turnTag" class="turnTag"><div class="tt-label"><span class="tt-big">青</span><span class="tt-sub">の番</span></div></div>
+        <button id="passBtn" class="passbtn" title="パス" aria-label="パス">パス</button>
+      </div>
+      <!-- 右：6×3 の漢字パネル -->
+      <div id="rack" class="rack"></div>
+    </div>
+    <div class="controls"><button id="resetBtn">盤面リセット</button></div>
+  </div>
+
+  <!-- 最下部スコア -->
+  <footer>
+    <div class="score">青:<span id="bCount" class="b">0</span> 枚　赤:<span id="rCount" class="r">0</span> 枚</div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ===== 基本定数 =====
+  const SIZE=4, TILE_COUNT=18, RACK_COLS=6, RACK_ROWS=3, SIDE_W=80;
+  const FLASH_REPEAT=5, FLASH_DUR_MS=250, FLASH_TOTAL_MS=FLASH_REPEAT*FLASH_DUR_MS+100;
+
+  // 教育漢字（小1→初期、タイルは小1+小2）
+  const G1="一右雨円王音下火花貝学気九休玉金空月犬見五口校左三山子四糸字耳七車手十出女小上森人水正生青石赤千川先早草足村大男竹中虫町天田土二日入年白八百文木本名目夕立力林六";
+  const G2="引羽雲園遠何科夏家歌画回会海絵外角楽活間岩顔汽記帰弓牛魚京教近兄形計元言原戸古午後語工公広交光考行高黄合谷国黒今才細作算止市矢姉思紙寺時自室社弱首秋週春書少場色食心新図数星晴声西切雪船線前組走多太体台地池知茶昼長鳥朝直通弟店点電刀冬当東答同道読内南肉馬売麦半番父風分聞米歩母方北毎妹万明鳴毛門夜野友用曜来理里話";
+  const POOL_G1=[...new Set(G1.split(''))], POOL_G12=[...new Set((G1+G2).split(''))];
+
+  // ===== 参照 =====
+  const gridEl=document.getElementById('grid');
+  const rackEl=document.getElementById('rack');
+  const resetBtn=document.getElementById('resetBtn');
+  const passBtn=document.getElementById('passBtn');
+  const msgbar=document.getElementById('msgbar');
+  const overlayEl=document.getElementById('overlay');
+  const turnOverlay=document.getElementById('turnOverlay');
+  const turnBadge=document.getElementById('turnBadge');
+  const turnTag=document.getElementById('turnTag');
+  const finalModal=document.getElementById('finalModal');
+  const finalBox=document.getElementById('finalBox');
+  const bCountEl=document.getElementById('bCount');
+  const rCountEl=document.getElementById('rCount');
+
+  // ===== 状態 =====
+  const state={
+    grid:Array.from({length:SIZE},()=>Array(SIZE).fill("")),
+    owner:Array.from({length:SIZE},()=>Array(SIZE).fill("")),
+    sel:{r:0,c:0},
+    tiles:[],
+    msgTimer:null,
+    turn:"blue",
+    gameOver:false,
+    failCount:{ blue:0, red:0 },
+  };
+
+  // ===== 初期化 =====
+  function init(){
+    state.grid=Array.from({length:SIZE},()=>Array(SIZE).fill(""));
+    state.owner=Array.from({length:SIZE},()=>Array(SIZE).fill(""));
+    state.turn="blue"; state.gameOver=false;
+    state.failCount={ blue:0, red:0 };
+
+    const a=rndFrom(POOL_G1), b=rndDiffFrom(POOL_G1,a);
+    state.grid[1][2]=a; state.grid[2][1]=b;
+
+    state.tiles=makeTiles();
+    renderGrid(); setSel(0,0);
+    renderRack();
+    forceUpdateTurnUI();
+    showTurnOverlay('blue');
+    setMsg('青の番です：マスを選んで、下の漢字をタップ');
+    finalModal.classList.remove('show');
+    layout();
+    updateCounts();
+  }
+
+  function makeTiles(){ return Array.from({length:TILE_COUNT},()=>({ch:rndFrom(POOL_G12),used:false})); }
+
+  // ===== レイアウト =====
+  function layout(){
+    const gap=6, rgap=6;
+    const W=document.body.clientWidth-24;
+    const sMaxByW=Math.floor((W-gap*3)/4);
+    const tMaxByW=Math.floor((W-SIDE_W-10-rgap*(RACK_COLS-1))/RACK_COLS);
+    const H=window.innerHeight;
+    const headerH=document.querySelector('header').offsetHeight;
+    const msgH=document.getElementById('msgbar').offsetHeight;
+    const footerH=document.querySelector('footer').offsetHeight;
+    const chromeH=headerH+msgH+footerH+10+12+8*2+8*2+8+36;
+    const avail=H-chromeH;
+
+    let s=Math.min(sMaxByW,86), t=Math.min(tMaxByW,72);
+    for(let tryS=s; tryS>=22; tryS--){
+      const boardH=4*tryS+3*gap+16;
+      const tByH=Math.floor((avail-boardH-8)/RACK_ROWS)-rgap;
+      const tCandidate=Math.min(tMaxByW,tByH);
+      if(tCandidate>=20){ s=tryS; t=tCandidate; break; }
+    }
+    gridEl.style.gridTemplateColumns=`repeat(4, ${s}px)`;
+    [...gridEl.children].forEach((el,idx)=>{
+      el.style.width=el.style.height=`${s}px`;
+      el.style.fontSize=Math.max(18,Math.floor(s*0.66))+'px';
+      const r=Math.floor(idx/4), c=idx%4;
+      el.classList.toggle('blue',state.owner[r][c]==='blue');
+      el.classList.toggle('red', state.owner[r][c]==='red');
+    });
+    rackEl.style.gridTemplateColumns=`repeat(${RACK_COLS}, ${t}px)`;
+    rackEl.style.gridTemplateRows=`repeat(${RACK_ROWS}, ${t}px)`;
+    [...rackEl.children].forEach(el=>{
+      el.style.width=el.style.height=`${t}px`;
+      el.style.fontSize=Math.max(18,Math.floor(t*1.08))+'px';
+    });
+  }
+  window.addEventListener('resize', layout);
+
+  // ===== ユーティリティ =====
+  const wait=ms=>new Promise(res=>setTimeout(res,ms));
+  const rndFrom=arr=>arr[(Math.random()*arr.length)|0];
+  function rndDiffFrom(arr,x){ let y=rndFrom(arr),g=0; while(y===x&&g++<20) y=rndFrom(arr); return y; }
+  function clearMsgClasses(){ msgbar.classList.remove('msg-blue','msg-red'); }
+  function setMsg(text,color,durationMs=2000){
+    clearTimeout(state.msgTimer);
+    clearMsgClasses();
+    if(color==='blue') msgbar.classList.add('msg-blue');
+    if(color==='red')  msgbar.classList.add('msg-red');
+    msgbar.textContent=text||'';
+    if(text){ state.msgTimer=setTimeout(()=>{ msgbar.textContent=''; clearMsgClasses(); },durationMs); }
+  }
+  function showTurnOverlay(colorOrYellow){
+    turnBadge.classList.remove('turn-blue','turn-red','turn-yellow');
+    if(colorOrYellow==='blue' || colorOrYellow==='red'){
+      turnBadge.classList.add(colorOrYellow==='blue'?'turn-blue':'turn-red');
+      turnBadge.textContent = colorOrYellow==='blue' ? '青の番です' : '赤の番です';
+    }else{
+      // 汎用表示にも使えるように
+      turnBadge.classList.add('turn-yellow');
+      turnBadge.textContent = String(colorOrYellow);
+    }
+    turnOverlay.style.opacity='1';
+    setTimeout(()=>{ turnOverlay.style.opacity='0'; },2000);
+  }
+  function forceUpdateTurnUI(){
+    turnTag.classList.remove('tag-blue','tag-red');
+    const isBlue=(state.turn==='blue');
+    turnTag.classList.add(isBlue?'tag-blue':'tag-red');
+    turnTag.innerHTML=`<div class="tt-label"><span class="tt-big">${isBlue?'青':'赤'}</span><span class="tt-sub">の番</span></div>`;
+    void turnTag.offsetWidth;
+    turnBadge.classList.remove('turn-blue','turn-red','turn-yellow');
+    turnBadge.classList.add(isBlue?'turn-blue':'turn-red');
+    turnBadge.textContent=isBlue?'青の番です':'赤の番です';
+  }
+  // 通常のターン交代（青↔赤）。suppressAnnounce=trueなら#msgbarへ「の番です」を出さない
+  async function changeTurnSync(delayMsForMsg=0, suppressAnnounce=false){
+    state.turn = (state.turn==='blue') ? 'red' : 'blue';
+    state.tiles = makeTiles();
+    renderRack();
+    forceUpdateTurnUI();
+    layout();
+    if(delayMsForMsg>0) await wait(delayMsForMsg);
+    if(!suppressAnnounce){
+      setMsg(state.turn==='blue'?'青の番です':'赤の番です', state.turn);
+    }
+    // 通常の交代では中央にも表示（色付き）
+    showTurnOverlay(state.turn);
+  }
+  // ★ 強制交代専用：中央に黄色「ターン交代」を1秒→その後に通常の「の番です」を表示
+  async function showSwitchThenNextTurn(){
+    // まず黄色で「ターン交代」1秒表示（手動で出して1秒で消す）
+    turnBadge.classList.remove('turn-blue','turn-red','turn-yellow');
+    turnBadge.classList.add('turn-yellow');
+    turnBadge.textContent='ターン交代';
+    turnOverlay.style.opacity='1';
+    await wait(1000);
+    turnOverlay.style.opacity='0';
+
+    // 次の手番へ（中央の通常表示は suppressAnnounce=true で抑制し、ここで明示表示）
+    await changeTurnSync(0, /*suppressAnnounce*/ true);
+    // 次手番の色で中央表示
+    turnOverlay.style.opacity='1';
+    turnBadge.classList.remove('turn-yellow','turn-blue','turn-red');
+    turnBadge.classList.add(state.turn==='blue'?'turn-blue':'turn-red');
+    turnBadge.textContent = state.turn==='blue' ? '青の番です' : '赤の番です';
+    setTimeout(()=>{ turnOverlay.style.opacity='0'; },2000);
+  }
+
+  // ===== 描画 =====
+  function renderGrid(){
+    gridEl.innerHTML='';
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        const d=document.createElement('div');
+        d.className='cell ' + (state.grid[r][c] ? '' : 'empty');
+        if(state.owner[r][c]==='blue') d.classList.add('blue');
+        if(state.owner[r][c]==='red')  d.classList.add('red');
+        d.textContent=state.grid[r][c]||'＋';
+        d.addEventListener('click',()=>setSel(r,c));
+        gridEl.appendChild(d);
+      }
+    }
+  }
+  function renderRack(){
+    rackEl.innerHTML='';
+    for(let i=0;i<TILE_COUNT;i++){
+      const t=state.tiles[i];
+      const el=document.createElement('div');
+      el.className='tile'+(t.used?' used':'');
+      el.textContent=t.ch;
+      el.addEventListener('click',()=>tryPlaceFromRack(i));
+      rackEl.appendChild(el);
+    }
+  }
+  function setSel(r,c){
+    state.sel={r,c};
+    [...gridEl.children].forEach((el,idx)=>{ el.classList.toggle('sel', idx===r*SIZE+c); });
+  }
+
+  // ===== メイン手順 =====
+  async function tryPlaceFromRack(i){
+    if(state.gameOver) return;
+    const tile=state.tiles[i]; if(tile.used) return;
+    const {r,c}=state.sel;
+    if(state.grid[r][c]){ setMsg("そのマスはすでに埋まっています。"); return; }
+
+    // 仮置き
+    state.grid[r][c]=tile.ch; updateCell(r,c);
+
+    // 判定中
+    overlayEl.style.visibility='visible';
+    const results=await checkAllNeighborsWords(r,c);
+    overlayEl.style.visibility='hidden';
+
+    if(results.length){
+      // タイル確定
+      tile.used=true; renderRack();
+
+      // 成立したので失敗カウントをリセット
+      state.failCount[state.turn] = 0;
+
+      // 熟語の2マスは即自色
+      for(const rlt of results){
+        const [a,b]=rlt.cells;
+        setOwner(a.r,a.c,state.turn);
+        setOwner(b.r,b.c,state.turn);
+      }
+
+      // 反転候補（置いたマスのみ起点）
+      const flipTargets = computeAllFlips([{ r, c }], state.turn);
+
+      // 成立表示（4秒）
+      const wordsText=[...new Set(results.map(rw=>`『${rw.word}』`))].join(' ');
+      setMsg(`成立：${wordsText}`, undefined, 4000);
+
+      // 作った文字（ペア）をフラッシュ
+      await flashPairs(results.map(rw=>rw.cells), state.turn);
+
+      // 反転対象をフラッシュ → 色変更
+      await flashCellsThenOwn(flipTargets, state.turn);
+
+      // スコア更新
+      updateCounts();
+
+      // 終局判定
+      if(isBoardFull()){
+        state.gameOver=true;
+        const {blue,red}=countOwners();
+        const resultText = `青:${blue}枚　赤:${red}枚\n` + (blue>red?"青の勝ち！":blue<red?"赤の勝ち！":"引き分け！");
+        showFinalModal(resultText);
+        return;
+      }
+
+      // 1秒後に相手へ（この時にパネルも自動リセット）
+      await changeTurnSync(1000);
+
+    }else{
+      // 不成立：戻す
+      setMsg('');
+      state.grid[r][c]=""; updateCell(r,c);
+      setMsg("熟語が成立しません");
+
+      // 不成立カウント
+      state.failCount[state.turn]++;
+
+      // ★ 3回到達で中央に黄色「ターン交代」→1秒後に次手番表示
+      if(state.failCount[state.turn] >= 3){
+        state.failCount[state.turn] = 0;
+        await showSwitchThenNextTurn();
+      }
+    }
+  }
+
+  // パス（即相手へ／タイル再配布）
+  passBtn.addEventListener('click', async ()=>{
+    if(state.gameOver) return;
+    await changeTurnSync(0);
+  });
+
+  // ===== 盤面ヘルパ =====
+  function setOwner(r,c,who){
+    state.owner[r][c]=who;
+    const el=gridEl.children[r*SIZE+c];
+    if(!el) return;
+    el.classList.toggle('blue', who==='blue');
+    el.classList.toggle('red',  who==='red');
+  }
+  function updateCell(r,c){
+    const el=gridEl.children[r*SIZE+c]; if(!el) return;
+    const v=state.grid[r][c]; el.textContent=v||'＋'; el.classList.toggle('empty', !v);
+  }
+  function isBoardFull(){ for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++) if(!state.grid[r][c]) return false; return true; }
+  function countOwners(){ let blue=0,red=0; for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++){ if(state.owner[r][c]==='blue') blue++; else if(state.owner[r][c]==='red') red++; } return {blue,red}; }
+  function updateCounts(){ const {blue,red}=countOwners(); bCountEl.textContent=blue; rCountEl.textContent=red; }
+
+  // ===== 熟語チェック（上下左右の2字） =====
+  async function checkAllNeighborsWords(r,c){
+    const placed=state.grid[r][c];
+    const dirs=[{dr:0,dc:-1},{dr:0,dc:1},{dr:-1,dc:0},{dr:1,dc:0}];
+    const hits=[];
+    for(const {dr,dc} of dirs){
+      const rr=r+dr, cc=c+dc;
+      if(rr<0||rr>=SIZE||cc<0||cc>=SIZE) continue;
+      const nb=state.grid[rr][cc]; if(!nb) continue;
+      const x=nb+placed, y=placed+nb;
+      if(await lookupExists(x)) hits.push({word:x, cells:[{r:rr,c:cc},{r,c}]});
+      if(await lookupExists(y)) hits.push({word:y, cells:[{r,c},{r:rr,c:cc}]});
+    }
+    return hits;
+  }
+
+  // ===== 反転（置いた1点起点で8方向） =====
+  function computeAllFlips(newCells, who){
+    const keys=new Set(); const list=[];
+    for(const p of newCells){
+      for(const q of calcFlipsFrom(p.r,p.c,who)){
+        const k=q.r+','+q.c; if(!keys.has(k)){ keys.add(k); list.push(q); }
+      }
+    }
+    return list;
+  }
+  function calcFlipsFrom(r,c, who){
+    const opp=(who==='blue')?'red':'blue';
+    const dirs8=[{dr:-1,dc:0},{dr:1,dc:0},{dr:0,dc:-1},{dr:0,dc:1},{dr:-1,dc:-1},{dr:-1,dc:1},{dr:1,dc:-1},{dr:1,dc:1}];
+    const flips=[];
+    for(const {dr,dc} of dirs8){
+      let rr=r+dr, cc=c+dc; const trail=[];
+      while(rr>=0&&rr<SIZE&&cc>=0&&cc<SIZE&&state.owner[rr][cc]===opp){ trail.push({r:rr,c:cc}); rr+=dr; cc+=dc; }
+      if(trail.length>0 && rr>=0&&rr<SIZE&&cc>=0&&cc<SIZE && state.owner[rr][cc]===who){ flips.push(...trail); }
+    }
+    return flips;
+  }
+
+  // 反転対象をフラッシュ→終わったら自色にする
+  function flashCellsThenOwn(cells, color){
+    return new Promise(resolve=>{
+      if(!cells.length){ resolve(); return; }
+      const idx=(r,c)=>r*SIZE+c;
+      const cls=(color==='blue')?'flash-blue':'flash-red';
+      const els=cells.map(p=>gridEl.children[idx(p.r,p.c)]).filter(Boolean);
+      els.forEach(el=>el.classList.add(cls));
+      setTimeout(()=>{
+        els.forEach(el=>el.classList.remove(cls));
+        cells.forEach(p=>setOwner(p.r,p.c,color));
+        resolve();
+      }, FLASH_TOTAL_MS);
+    });
+  }
+
+  // 作った2マスをフラッシュ
+  function flashPairs(pairs,color){
+    return new Promise(resolve=>{
+      const idx=(r,c)=>r*SIZE+c;
+      const cls=(color==='blue')?'flash-blue':'flash-red';
+      const els=[];
+      pairs.forEach(([a,b])=>{
+        const ea=gridEl.children[idx(a.r,a.c)];
+        const eb=gridEl.children[idx(b.r,b.c)];
+        if(ea){ ea.classList.add(cls); els.push(ea); }
+        if(eb){ eb.classList.add(cls); els.push(eb); }
+      });
+      setTimeout(()=>{ els.forEach(el=>el.classList.remove(cls)); resolve(); }, FLASH_TOTAL_MS);
+    });
+  }
+
+  // ===== オンライン辞書：存在判定のみ =====
+  async function lookupExists(word){
+    try{
+      const res=await fetch('https://jisho.org/api/v1/search/words?keyword='+encodeURIComponent(word),{cache:'no-store'});
+      const j=await res.json();
+      if(Array.isArray(j.data)){
+        const hit=j.data.find(en=>(en.japanese||[]).some(jp=>jp.word===word));
+        if(hit) return true;
+      }
+    }catch(_e){}
+    try{
+      const r2=await fetch('https://ja.wiktionary.org/w/api.php?action=query&format=json&origin=*&titles='+encodeURIComponent(word),{cache:'no-store'});
+      const j2=await r2.json();
+      const pages=j2?.query?.pages||{};
+      const first=Object.values(pages)[0];
+      if(first && Number(first.pageid)>0) return true;
+    }catch(_e){}
+    return false;
+  }
+
+  // ===== 勝敗モーダル =====
+  function showFinalModal(text){
+    finalBox.innerHTML = text.replace(/\n/g,'<br>');
+    finalModal.classList.add('show');
+    finalModal.onclick = ()=>{
+      finalModal.classList.remove('show');
+      init();
+    };
+  }
+
+  // ===== 全体リセット =====
+  resetBtn.addEventListener('click', ()=>{
+    init();
+    setMsg("盤面をリセットしました");
+  });
+
+  // 起動
+  init();
+})();
+</script>
+</body>
+</html>
